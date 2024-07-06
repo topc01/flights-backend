@@ -1,0 +1,147 @@
+name: Lint Workflow
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write 
+  contents: read  
+  
+jobs:
+  deploy-to-ec2:
+    runs-on: ubuntu-latest
+    if: ${{always()}}
+    needs: [build-and-push, build-and-push-api]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{secrets.AWS_ACCESS_KEY_ID0}}
+          aws-secret-access-key: ${{secrets.AWS_SECRET_ACCESS_KEY0}}
+          aws-region: us-east-1
+      - name: Login to Amazon ECR
+        id: login-ecr-public
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registry-type: public
+          mask-password: "true"
+
+      - name: Zip artifact to deploy
+        run: |
+          zip -r deploy.zip scripts/ appspec.yml docker-compose-prod.yml
+      - name: Copy Zip to S3
+        run: |
+          aws s3 cp deploy.zip s3://back-e1/deploy.zip
+      
+      - name: Create CodeDeploy Deployment
+        id: create-deployment-trigger
+        run: |
+          deploymentId=$(aws deploy create-deployment --application-name \
+          back-e1-app --deployment-group-name group-back-e1 --region us-east-1 \
+          --s3-location bucket=back-e1,key=deploy.zip,bundleType=zip \
+          --description "Automatic deployment from githubactions commit ${{github.sha}}" | jq -r '.deploymentId')
+          echo "DeploymentId=$deploymentId" >> $GITHUB_OUTPUT
+    
+      - name: Wait for deployment to finish
+        run: |
+          aws deploy wait deployment-successful --deployment-id ${{ steps.create-deployment-trigger.outputs.deploymentId }} --region us-east-1
+  
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials and login ECR
+        uses: ./.github/actions/aws-configure-login
+        with:
+          aws-access-key-id: ${{secrets.AWS_ACCESS_KEY_ID0}}
+          aws-secret-access-key: ${{secrets.AWS_SECRET_ACCESS_KEY0}}
+          aws-region: us-east-1
+
+      - name: Build, tag, and push master to ECR
+        env:
+          REGISTRY: public.ecr.aws
+          REGISTRY_ALIAS: q1x1c2c1
+          REPOSITORY: arquisis-g1-back
+          IMAGE_TAG: master-latest
+        run: |
+          cd worker-service/master
+          docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f Dockerfile-master .
+          docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
+      
+      - name: Build, tag, and push worker to ECR
+        env:
+          REGISTRY: public.ecr.aws
+          REGISTRY_ALIAS: q1x1c2c1
+          REPOSITORY: arquisis-g1-back
+          IMAGE_TAG: worker-latest
+        run: |
+          cd worker-service/worker
+          docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f Dockerfile-worker .
+          docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
+
+      - name: Build, tag, and push publisher to ECR
+        env:
+          REGISTRY: public.ecr.aws
+          REGISTRY_ALIAS: q1x1c2c1
+          REPOSITORY: arquisis-g1-back
+          IMAGE_TAG: publisher-latest
+        run: |
+          cd publisher
+          docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f Dockerfile-pub .
+          docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
+        
+      - name: Build, tag, and push subscriber to ECR
+        env:
+          REGISTRY: public.ecr.aws
+          REGISTRY_ALIAS: q1x1c2c1
+          REPOSITORY: arquisis-g1-back
+          IMAGE_TAG: subscriber-latest
+        run: |
+          cd subscriber
+          docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f Dockerfile-mqtt .
+          docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
+
+      - name: Build, tag, and push auth to ECR
+        env:
+          REGISTRY: public.ecr.aws
+          REGISTRY_ALIAS: q1x1c2c1
+          REPOSITORY: arquisis-g1-back
+          IMAGE_TAG: auth-latest
+        run: |
+          cd auth-service
+          docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f Dockerfile-auth .
+          docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
+
+  
+  build-and-push-api:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials and login ECR
+        uses: ./.github/actions/aws-configure-login
+        with:
+          aws-access-key-id: ${{secrets.AWS_ACCESS_KEY_ID0}}
+          aws-secret-access-key: ${{secrets.AWS_SECRET_ACCESS_KEY0}}
+          aws-region: us-east-1
+
+      - name: Build, tag, and push api to ECR
+        env:
+          REGISTRY: public.ecr.aws
+          REGISTRY_ALIAS: q1x1c2c1
+          REPOSITORY: arquisis-g1-back
+          IMAGE_TAG: api-latest
+        run: |
+          cd exp-api
+          docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f Dockerfile-api .
+          docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG

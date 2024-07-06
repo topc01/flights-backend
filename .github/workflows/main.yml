@@ -1,0 +1,72 @@
+name: Lint Workflow
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+
+permissions:
+  id-token: write 
+  contents: read  
+  
+jobs:
+  api:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm --prefix exp-api ci
+
+      - name: Lint with npm
+        run: npm --prefix exp-api run lint
+
+      - name: Test with npm
+        run: |
+          echo "Setting JWT_SECRET environment variable"
+          export JWT_SECRET="${{ secrets.JWT_SECRET }}"
+          npm --prefix exp-api run test
+
+  subscriber_flights:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm --prefix subscriber ci
+
+      - name: Lint with npm
+        run: npm --prefix subscriber run lint
+
+  auth:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm --prefix auth-service ci
+
+      - name: Lint with npm
+        run: npm --prefix auth-service run lint
